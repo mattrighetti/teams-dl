@@ -1,0 +1,48 @@
+#!/bin/bash
+
+function __check_output() {
+    if [[ $? -ne 0 ]]; then
+        echo "Error getting JSON"
+        exit 1
+    fi
+}
+
+function api_query_video() {
+    VIDEO_ID=$1
+
+    curl -s "https://euwe-1.api.microsoftstream.com/api/videos/${VIDEO_ID}?\$expand=creator&api-version=1.4-private" \
+         -H "Authorization: Bearer ${TOKEN}"
+}
+
+function getJSONdata() {
+    JSON=$1
+    FIELD=$2
+    
+    echo $JSON | \
+    jq -r ".${FIELD}" 2>/dev/null
+}
+
+function download() {
+    URL=$1
+    FILENAME=$2
+
+    echo "Downloading ${FILENAME}"
+    ffmpeg -nostdin -headers "Authorization: Bearer ${TOKEN}" \
+        -i "${URL}" \
+        -codec:a copy \
+        -codec:v copy \
+        -n "${FILENAME}.mp4" 1>/dev/null 2>&1
+}
+
+export TOKEN=$(cat token)
+
+trap "exit" INT
+while read LINK; do
+    guid=${LINK##*/}
+    JSON=$(api_query_video ${guid})
+    __check_output
+    URL=$(getJSONdata "${JSON}" "playbackUrls[2].playbackUrl")
+    TITLE=$(getJSONdata "${JSON}" "name")
+    DESCRIPTION=$(getJSONdata "${JSON}" "description")
+    download $URL "${TITLE}-${DESCRIPTION}"
+done < links.txt
