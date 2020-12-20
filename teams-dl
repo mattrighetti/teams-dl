@@ -14,6 +14,39 @@ function api_query_video() {
          -H "Authorization: Bearer ${TOKEN}"
 }
 
+function videolink_query() {
+    LINK=$1
+
+    curl -s "$LINK" \
+        -H "Authorization: Bearer ${TOKEN}" | \
+        grep -o -E 'URI=".*"' | \
+        tail -1 | \
+        grep -o -E '".*"' | \
+        tr -d '"'
+}
+
+function protectionKeyUri_query() {
+    LINK=$1
+
+    tmp=$(curl -s $LINK -H "Authorization: Bearer ${TOKEN}")
+    echo $tmp | grep -o -E 'URI=".*"' | grep -o -E '".*"' | tr -d '"'
+}
+
+function protectionKey_query() {
+    LINK=$1
+
+    curl -s $LINK \
+        -H "Authorization: Bearer ${TOKEN}" \
+        -H "encoding: null"
+}
+
+function getBaseUrl() {
+    HLS_URL=$1
+
+    rm_part="${HLS_URL##*/}"
+    echo ${HLS_URL/${rm_part}}
+}
+
 function getJSONdata() {
     JSON=$1
     FIELD=$2
@@ -36,7 +69,30 @@ function download() {
 
 export TOKEN=$(cat token)
 
-trap "exit" INT
+LINK=$(cat links.txt)
+guid=${LINK##*/}
+JSON=$(api_query_video ${guid})
+__check_output
+
+URL=$(getJSONdata "${JSON}" "playbackUrls[2].playbackUrl")
+PLAYLIST_URI=$(videolink_query $URL)
+BASE_URL=$(getBaseUrl $URL)
+PKEY_URL="$( protectionKeyUri_query $PLAYLIST_URI )"
+KEY_PROT="$( protectionKey_query $PKEY_URL )"
+BASE_URI=${PLAYLIST_URI##*/}
+echo $PLAYLIST_URI
+echo $BASE_URL
+echo $PLAYLIST_URI
+echo $PKEY_URL
+echo $KEY_PROT
+
+exit 0
+
+
+
+
+
+
 while read LINK; do
     guid=${LINK##*/}
     JSON=$(api_query_video ${guid})
@@ -44,5 +100,5 @@ while read LINK; do
     URL=$(getJSONdata "${JSON}" "playbackUrls[2].playbackUrl")
     TITLE=$(getJSONdata "${JSON}" "name")
     DESCRIPTION=$(getJSONdata "${JSON}" "description")
-    download $URL "${TITLE}-${DESCRIPTION}"
+    # download $URL "${TITLE}-${DESCRIPTION}"
 done < links.txt
