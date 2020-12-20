@@ -7,18 +7,22 @@ function __check_output() {
     fi
 }
 
-function api_query_video() {
+function getMainJSON() {
     VIDEO_ID=$1
 
-    curl -s "https://euwe-1.api.microsoftstream.com/api/videos/${VIDEO_ID}?\$expand=creator&api-version=1.4-private" \
-         -H "Authorization: Bearer ${TOKEN}"
+    curl -s "https://euwe-1.api.microsoftstream.com/api/videos/${VIDEO_ID}?\$expand=creator&api-version=1.0-private" \
+         -H "Authorization: Bearer ${TOKEN}" > mainJSON.txt
+    
+    cat mainJSON.txt
 }
 
 function videolink_query() {
     LINK=$1
 
     curl -s "$LINK" \
-        -H "Authorization: Bearer ${TOKEN}" | \
+        -H "Authorization: Bearer ${TOKEN}" > videolink.txt
+    
+    cat videolink.txt | \
         grep -o -E 'URI=".*"' | \
         tail -1 | \
         grep -o -E '".*"' | \
@@ -28,8 +32,21 @@ function videolink_query() {
 function protectionKeyUri_query() {
     LINK=$1
 
-    tmp=$(curl -s $LINK -H "Authorization: Bearer ${TOKEN}")
-    echo $tmp | grep -o -E 'URI=".*"' | grep -o -E '".*"' | tr -d '"'
+    curl -s $LINK \
+        -H "Authorization: Bearer ${TOKEN}" > keyUri.txt
+    
+    cat keyUri.txt | \
+    grep -o -E 'URI=".*"' | \
+    grep -o -E '".*"' | \
+    tr -d '"'
+}
+
+function video_data_full() {
+    LINK=$1
+    BASE=$2
+
+    curl -s $LINK \
+        -H "Authorization: Bearer ${TOKEN}" > video_full.txt
 }
 
 function protectionKey_query() {
@@ -69,22 +86,24 @@ function download() {
 
 export TOKEN=$(cat token)
 
-LINK=$(cat links.txt)
+LINK=$( cat links.txt )
 guid=${LINK##*/}
-JSON=$(api_query_video ${guid})
+JSON=$( getMainJSON ${guid} )
 __check_output
 
-URL=$(getJSONdata "${JSON}" "playbackUrls[2].playbackUrl")
-PLAYLIST_URI=$(videolink_query $URL)
-BASE_URL=$(getBaseUrl $URL)
+HLS_URL=$(getJSONdata "${JSON}" "playbackUrls[2].playbackUrl")
+PLAYLIST_URI=$(videolink_query $HLS_URL)
+BASE_URL=$(getBaseUrl $HLS_URL)
 PKEY_URL="$( protectionKeyUri_query $PLAYLIST_URI )"
 KEY_PROT="$( protectionKey_query $PKEY_URL )"
 BASE_URI=${PLAYLIST_URI##*/}
+FULL_V=$( video_data_full $PLAYLIST_URI $BASE_URI )
 echo $PLAYLIST_URI
 echo $BASE_URL
 echo $PLAYLIST_URI
 echo $PKEY_URL
 echo $KEY_PROT
+echo $FULL_V
 
 exit 0
 
