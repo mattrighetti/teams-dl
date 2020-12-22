@@ -75,10 +75,11 @@ function create_tmp_m3u8_audio() {
 
 function protectionKey_query() {
     LINK=$1
+    OFILE=$2
 
     curl -s $LINK \
         -H "Authorization: Bearer ${TOKEN}" \
-        -H "encoding: null" > ./videos/my.key
+        -H "encoding: null" > $OFILE
 }
 
 function create_tmp_m3u8_video() {
@@ -100,11 +101,12 @@ function aria2_download() {
     path=$2
     n=$3
 
+    infoln "Downloading $FILE ..."
     aria2c -i "${FILE}" \
         -j $n \
         -x $n \
         -d "$path" \
-        --header="Authorization: Bearer ${TOKEN}"
+        --header="Authorization: Bearer ${TOKEN}" 1>/dev/null 2>&1
 }
 
 function join_video_audio() {
@@ -112,10 +114,11 @@ function join_video_audio() {
     AFILE=$2
     OFILE=$3
 
+    infoln "Joining video and audio..."
     ffmpeg \
         -protocol_whitelist file,http,https,tcp,tls,crypto -allowed_extensions ALL -i "$AFILE" \
         -protocol_whitelist file,http,https,tcp,tls,crypto -allowed_extensions ALL -i "$VFILE" \
-        -async 1 -c copy -bsf:a aac_adtstoasc -n "$OFILE"
+        -async 1 -c copy -bsf:a aac_adtstoasc -n "$OFILE" 1>/dev/null 2>&1
 }
 
 function getJSONdata() {
@@ -137,15 +140,16 @@ BASE_URL="${HLS_URL%/*}/"
 VIDEO_URI=$( videolink_query $HLS_URL )
 AUDIO_URI=$( audiolink_query $HLS_URL )
 
-download_m3u8_data "$BASE_URL$VIDEO_URI" video_full.m3u8
-download_m3u8_data "$BASE_URL$AUDIO_URI" audio_full.m3u8
+download_m3u8_data "$BASE_URL$VIDEO_URI" "video_full.m3u8"
+download_m3u8_data "$BASE_URL$AUDIO_URI" "audio_full.m3u8"
 create_tmp_m3u8_video "video_full.m3u8"
 create_tmp_m3u8_audio "audio_full.m3u8"
 
-protectionKey_query "$( getProtectionKeyURL "$BASE_URL$VIDEO_URI" )"
+PROTECTION_KEY_URL="$( getProtectionKeyURL "$BASE_URL$VIDEO_URI" )"
+protectionKey_query $PROTECTION_KEY_URL "./videos/my.key"
 
-aria2_download "video_full.m3u8" "./videos/video_segments" 5
-aria2_download "audio_full.m3u8" "./videos/audio_segments" 5
+aria2_download "video_full.m3u8" "videos/video_segments" 5
+aria2_download "audio_full.m3u8" "videos/audio_segments" 5
 
 join_video_audio "videos/audio_tmp.m3u8" "videos/video_tmp.m3u8" "video.mp4"
 
