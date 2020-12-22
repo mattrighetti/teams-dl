@@ -1,19 +1,143 @@
 #!/bin/bash
 
-function __check_output() {
-    if [[ $? -ne 0 ]]; then
-        echo "Error getting JSON"
-        exit 1
-    fi
-}
+source scriptUtils.sh
 
-function api_query_video() {
+# Returns initial JSON that contains critical data about HLS location and video name + description
+function getMainJSON() {
     VIDEO_ID=$1
 
-    curl -s "https://euwe-1.api.microsoftstream.com/api/videos/${VIDEO_ID}?\$expand=creator&api-version=1.4-private" \
+    curl -s "https://euwe-1.api.microsoftstream.com/api/videos/${VIDEO_ID}?\$expand=creator&api-version=1.0-private" \
          -H "Authorization: Bearer ${TOKEN}"
 }
 
+# Returns video URL
+function videolink_query() {
+    LINK=$1
+
+    curl -s $LINK \
+        -H "Authorization: Bearer ${TOKEN}" | \
+        grep -i -o "qualitylevels([0-9]*)/manifest(video.*)" | \
+        grep -v "keyframes" | \
+        tail -n 1
+}
+
+# Returns audio URL
+function audiolink_query() {
+    LINK=$1
+
+    curl -s $LINK \
+        -H "Authorization: Bearer ${TOKEN}" | \
+        grep -i -o "qualitylevels([0-9]*)/manifest(a.*)" | \
+        tail -n 1
+}
+
+# Returns key URL
+function getProtectionKeyURL() {
+    LINK=$1
+
+    curl -s $LINK \
+        -H "Authorization: Bearer ${TOKEN}" | \
+        grep -o -E '"https.*"' | \
+        tr -d '"'
+}
+
+# Downloads and saved full original manifest needed to download video/audio fragments
+function download_m3u8_data() {
+    LINK=$1
+    OFILE=$2
+    OFILE_FOLDER=${OFILE%%/*}
+
+    if [[ ! -d $OFILE_FOLDER ]]; then
+        warnln "$OFILE_FOLDER doesn't exist"
+        infoln "Creating folder..."
+        mkdir -p $OFILE_FOLDER
+    fi
+
+    curl -s $LINK \
+        -H "Authorization: Bearer ${TOKEN}" > $OFILE
+}
+
+# Makes TMP file needed to locate audio fragments downloaded locally with aria2
+function create_tmp_m3u8_audio() {
+    IFILE=$1
+    TMP_KEY="file://$(pwd)/tmp"
+    KEY_FILE="my.key"
+    ID=$( cat $IFILE | grep -o -E '".*"' | sed -E "s/.*api\/videos\/([A-Za-z0-9-]+)\/.*/\1/" )
+
+    NEW_URI="${TMP_KEY}/${KEY_FILE}"
+    APATH="audio_segments/"
+
+    cat $IFILE | \
+        sed -e "s#\".*\"#\"${NEW_URI}\"#" | \
+        sed -E "s#.*(Fragments.*)#${APATH}\1#" > ./tmp/audio_tmp.m3u8
+}
+
+# Creates file that contains key to decrypt audio/video fragments
+function protectionKey_query() {
+    LINK=$1
+    OFILE=$2
+
+    curl -s $LINK \
+        -H "Authorization: Bearer ${TOKEN}" \
+        -H "encoding: null" > $OFILE
+}
+
+# Makes TMP file needed to locate video fragments downloaded locally with aria2
+function create_tmp_m3u8_video() {
+    IFILE=$1
+    TMP_KEY="file://$(pwd)/tmp"
+    KEY_FILE="my.key"
+    ID=$( cat $IFILE | grep -o -E '".*"' | sed -E "s/.*api\/videos\/([A-Za-z0-9-]+)\/.*/\1/" )
+
+    NEW_URI="${TMP_KEY}/${KEY_FILE}"
+    VPATH="video_segments/"
+
+    cat $IFILE | \
+        sed -e "s#\".*\"#\"${NEW_URI}\"#" | \
+        sed -E "s#.*(Fragments.*)#${VPATH}\1#" > ./tmp/video_tmp.m3u8
+}
+
+# Downloads video/audio fragments FAST
+function aria2_download() {
+    FILE=$1
+    path=$2
+    n=$3
+
+    infoln "Downloading ${FILE} of ${TITLE} ..."
+    aria2c -i "${FILE}" \
+        -j $n \
+        -x $n \
+        -d "$path" \
+        --header="Authorization: Bearer ${TOKEN}" 1>/dev/null 2>&1
+}
+
+# Joins video and audio fragments after download
+function join_video_audio() {
+    VFILE=$1
+    AFILE=$2
+    OFILE=$3
+
+    infoln "Joining video and audio..."
+    ffmpeg \
+        -nostdin \
+        -protocol_whitelist file,http,https,tcp,tls,crypto -allowed_extensions ALL -i "$AFILE" \
+        -protocol_whitelist file,http,https,tcp,tls,crypto -allowed_extensions ALL -i "$VFILE" \
+        -async 1 -c copy -bsf:a aac_adtstoasc -n "$OFILE" 1>/dev/null 2>&1
+    
+    if [[ $? -ne 0 ]]; then
+        fatalln "Something went wrong"
+        fatalln "Exit with status 1"
+    else
+        successln "Successfully downloaded $TITLE - $DESCRIPTION"
+    fi
+}
+
+# Cleans tmp folder
+function clean_tmp() {
+    rm -r tmp/*
+}
+
+# Extracts FIELD from given JSON
 function getJSONdata() {
     JSON=$1
     FIELD=$2
@@ -22,27 +146,44 @@ function getJSONdata() {
     jq -r ".${FIELD}" 2>/dev/null
 }
 
-function download() {
-    URL=$1
-    FILENAME=$2
+# Downloads video given a GUID that usually appears at the end of the sharing link
+function download_video() {
+    GUID=$1
 
-    echo "Downloading ${FILENAME}"
-    ffmpeg -nostdin -headers "Authorization: Bearer ${TOKEN}" \
-        -i "${URL}" \
-        -codec:a copy \
-        -codec:v copy \
-        -n "${FILENAME}.mp4" 1>/dev/null 2>&1
+    JSON=$( getMainJSON ${GUID} )
+
+    HLS_URL=$(getJSONdata "${JSON}" "playbackUrls[2].playbackUrl")
+    export TITLE=$( getJSONdata "${JSON}" "name" )
+    export DESCRIPTION=$( getJSONdata "${JSON}" "description" )
+    BASE_URL="${HLS_URL%/*}/"
+    VIDEO_URI=$( videolink_query $HLS_URL )
+    AUDIO_URI=$( audiolink_query $HLS_URL )
+
+    download_m3u8_data "$BASE_URL$VIDEO_URI" "tmp/video_full.m3u8"
+    download_m3u8_data "$BASE_URL$AUDIO_URI" "tmp/audio_full.m3u8"
+
+    PROTECTION_KEY_URL="$( getProtectionKeyURL "$BASE_URL$VIDEO_URI" )"
+    protectionKey_query $PROTECTION_KEY_URL "tmp/my.key"
+
+    aria2_download "tmp/video_full.m3u8" "tmp/video_segments" 5
+    aria2_download "tmp/audio_full.m3u8" "tmp/audio_segments" 5
+
+    create_tmp_m3u8_video "tmp/video_full.m3u8"
+    create_tmp_m3u8_audio "tmp/audio_full.m3u8"
+    join_video_audio "tmp/audio_tmp.m3u8" "tmp/video_tmp.m3u8" "videos/${TITLE} - ${DESCRIPTION}.mp4"
+    clean_tmp
 }
 
-export TOKEN=$(cat token)
+export TOKEN=$( cat token )
 
-trap "exit" INT
+if [[ ! -d "./videos" ]]; then
+    mkdir videos
+fi
+
 while read LINK; do
     guid=${LINK##*/}
-    JSON=$(api_query_video ${guid})
-    __check_output
-    URL=$(getJSONdata "${JSON}" "playbackUrls[2].playbackUrl")
-    TITLE=$(getJSONdata "${JSON}" "name")
-    DESCRIPTION=$(getJSONdata "${JSON}" "description")
-    download $URL "${TITLE}-${DESCRIPTION}"
+    successln $guid
+    download_video $guid
 done < links.txt
+
+exit 0
