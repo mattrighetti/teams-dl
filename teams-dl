@@ -1,5 +1,7 @@
 #!/bin/bash
 
+source scriptUtils.sh
+
 function __check_output() {
     if [[ $? -ne 0 ]]; then
         echo "Error getting JSON"
@@ -19,10 +21,10 @@ function getMainJSON() {
 function videolink_query() {
     LINK=$1
 
-    curl -s "$LINK" \
-        -H "Authorization: Bearer ${TOKEN}" > videolink.txt
+    curl -s $LINK \
+        -H "Authorization: Bearer ${TOKEN}" > videolinkData.txt
     
-    cat videolink.txt | \
+    cat videolinkData.txt | \
         grep -o -E 'URI=".*"' | \
         tail -1 | \
         grep -o -E '".*"' | \
@@ -46,7 +48,7 @@ function video_data_full() {
     BASE=$2
 
     curl -s $LINK \
-        -H "Authorization: Bearer ${TOKEN}" > video_full.txt
+        -H "Authorization: Bearer ${TOKEN}" > video_full.m3u8
 }
 
 function protectionKey_query() {
@@ -54,7 +56,32 @@ function protectionKey_query() {
 
     curl -s $LINK \
         -H "Authorization: Bearer ${TOKEN}" \
-        -H "encoding: null"
+        -H "encoding: null" > key.txt
+
+    cat key.txt
+}
+
+function video_data_tmp() {
+    TMP_KEY="file://$(pwd)/videos"
+    KEY_FILE="my.key"
+    ID=$( cat video_full.m3u8 | grep -o -E '".*"' | sed -E "s/.*api\/videos\/([A-Za-z0-9-]+)\/.*/\1/" )
+
+    NEW_URI="${TMP_KEY}/${ID}/${KEY_FILE}"
+
+    cat video_full.m3u8 | \
+        sed -e "s#\".*\"#\"${NEW_URI}\"#" | \
+        sed -E "s/.*(Fragments.*)/\1/" > video_tmp.m3u8
+}
+
+function aria2video_download() {
+    VIDEO_FULL=$1
+    n=$2
+
+    aria2c -i "${VIDEO_FULL}" \
+        -j $n \
+        -x $n \
+        -d "./videos/video_segments" \
+        --header="Authorization: Bearer ${TOKEN}"
 }
 
 function getBaseUrl() {
@@ -92,32 +119,26 @@ JSON=$( getMainJSON ${guid} )
 __check_output
 
 HLS_URL=$(getJSONdata "${JSON}" "playbackUrls[2].playbackUrl")
-PLAYLIST_URI=$(videolink_query $HLS_URL)
-BASE_URL=$(getBaseUrl $HLS_URL)
-PKEY_URL="$( protectionKeyUri_query $PLAYLIST_URI )"
+infoln $HLS_URL
+
+BASE_URL=$( getBaseUrl $HLS_URL )
+warnln $BASE_URL
+
+PLAYLIST_URI=$( videolink_query $HLS_URL | sed -E 's/,type=keyframes//' )
+infoln $PLAYLIST_URI
+
+PKEY_URL="$( protectionKeyUri_query "${PLAYLIST_URI}" )"
+warnln $PKEY_URL
+
 KEY_PROT="$( protectionKey_query $PKEY_URL )"
-BASE_URI=${PLAYLIST_URI##*/}
+infoln $KEY_PROT
+
+BASE_URI=${PLAYLIST_URI%\/*}
+BASE_URI=${BASE_URI##*=}
+warnln $BASE_URI
+
 FULL_V=$( video_data_full $PLAYLIST_URI $BASE_URI )
-echo $PLAYLIST_URI
-echo $BASE_URL
-echo $PLAYLIST_URI
-echo $PKEY_URL
-echo $KEY_PROT
-echo $FULL_V
+video_data_tmp
+aria2video_download "video_full.m3u8" 10
 
 exit 0
-
-
-
-
-
-
-while read LINK; do
-    guid=${LINK##*/}
-    JSON=$(api_query_video ${guid})
-    __check_output
-    URL=$(getJSONdata "${JSON}" "playbackUrls[2].playbackUrl")
-    TITLE=$(getJSONdata "${JSON}" "name")
-    DESCRIPTION=$(getJSONdata "${JSON}" "description")
-    # download $URL "${TITLE}-${DESCRIPTION}"
-done < links.txt
