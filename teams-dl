@@ -27,6 +27,14 @@ function videolink_query() {
         tr -d '"'
 }
 
+function audiolink_query() {
+    LINK=$1
+
+    curl -s $LINK \
+        -H "Authorization: Bearer ${TOKEN}" | \
+        tail -n 1
+}
+
 function protectionKeyUri_query() {
     LINK=$1
 
@@ -41,10 +49,30 @@ function protectionKeyUri_query() {
 
 function video_data_full() {
     LINK=$1
-    BASE=$2
 
     curl -s $LINK \
         -H "Authorization: Bearer ${TOKEN}" > video_full.m3u8
+}
+
+function audio_data_full() {
+    LINK=$1
+    BASE=$2
+
+    curl -s $LINK \
+        -H "Authorization: Bearer ${TOKEN}" | \
+        sed -E "s#Fragments#${BASE}/Fragments#" > audio_full.m3u8
+}
+
+function audio_data_tmp() {
+    TMP_KEY="file://$(pwd)/videos"
+    KEY_FILE="my.key"
+    ID=$( cat audio_full.m3u8 | grep -o -E '".*"' | sed -E "s/.*api\/videos\/([A-Za-z0-9-]+)\/.*/\1/" )
+
+    NEW_URI="${TMP_KEY}/${ID}/${KEY_FILE}"
+
+    cat audio_full.m3u8 | \
+        sed -e "s#\".*\"#\"${NEW_URI}\"#" | \
+        sed -E "s/.*(audio_segments\/Fragments.*)/\1/" > audio_tmp.m3u8
 }
 
 function protectionKey_query() {
@@ -80,6 +108,17 @@ function aria2video_download() {
         --header="Authorization: Bearer ${TOKEN}"
 }
 
+function aria2audio_download() {
+    AUDIO_FULL=$1
+    n=$2
+
+    aria2c -i "${AUDIO_FULL}" \
+        -j $n \
+        -x $n \
+        -d "./videos/audio_segments" \
+        --header="Authorization: Bearer ${TOKEN}"
+}
+
 function getJSONdata() {
     JSON=$1
     FIELD=$2
@@ -101,8 +140,15 @@ PKEY_URL="$( protectionKeyUri_query "${PLAYLIST_URI}" )"
 KEY_PROT="$( protectionKey_query $PKEY_URL )"
 BASE_URI=${PLAYLIST_URI%\/*}
 BASE_URI=${BASE_URI##*=}
-FULL_V=$( video_data_full $PLAYLIST_URI $BASE_URI )
+FULL_V=$( video_data_full $PLAYLIST_URI )
 video_data_tmp
-aria2video_download "video_full.m3u8" 10
+# aria2video_download "video_full.m3u8" 10
+
+AUDIO_URI=$( audiolink_query $HLS_URL | sed -E 's/.*\/(QualityLevels[A-Za-z,=-]*)/\1/' )
+AUDIO_URI=${AUDIO_URI//[$'\t\r\n']}
+AUDIO_LINK="${BASE_URI%/*}/${AUDIO_URI}"
+audio_data_full $AUDIO_LINK "${BASE_URI%/*}/${AUDIO_URI%/*}"
+audio_data_tmp
+aria2audio_download "audio_full.m3u8" 5
 
 exit 0
