@@ -35,7 +35,7 @@ function audiolink_query() {
         tail -n 1
 }
 
-function protectionKeyUri_query() {
+function getProtectionKeyURL() {
     LINK=$1
 
     curl -s $LINK \
@@ -44,29 +44,31 @@ function protectionKeyUri_query() {
         tr -d '"'
 }
 
-function video_data_full() {
+function download_m3u8_data() {
     LINK=$1
+    OFILE=$2
 
     curl -s $LINK \
-        -H "Authorization: Bearer ${TOKEN}" > video_full.m3u8
+        -H "Authorization: Bearer ${TOKEN}" > $OFILE
 }
 
 function audio_data_full() {
     LINK=$1
 
     curl -s $LINK \
-        -H "Authorization: Bearer ${TOKEN}" > audio_full.m3u8
+        -H "Authorization: Bearer ${TOKEN}" > $OFILE
 }
 
-function audio_data_tmp() {
+function create_tmp_m3u8_audio() {
+    IFILE=$1
     TMP_KEY="file://$(pwd)/videos"
     KEY_FILE="my.key"
-    ID=$( cat audio_full.m3u8 | grep -o -E '".*"' | sed -E "s/.*api\/videos\/([A-Za-z0-9-]+)\/.*/\1/" )
+    ID=$( cat $IFILE | grep -o -E '".*"' | sed -E "s/.*api\/videos\/([A-Za-z0-9-]+)\/.*/\1/" )
 
     NEW_URI="${TMP_KEY}/${KEY_FILE}"
     APATH="audio_segments/"
 
-    cat audio_full.m3u8 | \
+    cat $IFILE | \
         sed -e "s#\".*\"#\"${NEW_URI}\"#" | \
         sed -E "s#.*(Fragments.*)#${APATH}\1#" > ./videos/audio_tmp.m3u8
 }
@@ -79,15 +81,16 @@ function protectionKey_query() {
         -H "encoding: null" > ./videos/my.key
 }
 
-function video_data_tmp() {
+function create_tmp_m3u8_video() {
+    IFILE=$1
     TMP_KEY="file://$(pwd)/videos"
     KEY_FILE="my.key"
-    ID=$( cat video_full.m3u8 | grep -o -E '".*"' | sed -E "s/.*api\/videos\/([A-Za-z0-9-]+)\/.*/\1/" )
+    ID=$( cat $IFILE | grep -o -E '".*"' | sed -E "s/.*api\/videos\/([A-Za-z0-9-]+)\/.*/\1/" )
 
     NEW_URI="${TMP_KEY}/${KEY_FILE}"
     VPATH="video_segments/"
 
-    cat video_full.m3u8 | \
+    cat $IFILE | \
         sed -e "s#\".*\"#\"${NEW_URI}\"#" | \
         sed -E "s#.*(Fragments.*)#${VPATH}\1#" > ./videos/video_tmp.m3u8
 }
@@ -134,13 +137,12 @@ BASE_URL="${HLS_URL%/*}/"
 VIDEO_URI=$( videolink_query $HLS_URL )
 AUDIO_URI=$( audiolink_query $HLS_URL )
 
-video_data_full "$BASE_URL$VIDEO_URI"
-video_data_tmp
-audio_data_full "$BASE_URL$AUDIO_URI"
-audio_data_tmp
+download_m3u8_data "$BASE_URL$VIDEO_URI" video_full.m3u8
+download_m3u8_data "$BASE_URL$AUDIO_URI" audio_full.m3u8
+create_tmp_m3u8_video "video_full.m3u8"
+create_tmp_m3u8_audio "audio_full.m3u8"
 
-PKEY_URL="$( protectionKeyUri_query "$BASE_URL$VIDEO_URI" )"
-protectionKey_query $PKEY_URL
+protectionKey_query "$( getProtectionKeyURL "$BASE_URL$VIDEO_URI" )"
 
 aria2_download "video_full.m3u8" "./videos/video_segments" 5
 aria2_download "audio_full.m3u8" "./videos/audio_segments" 5
