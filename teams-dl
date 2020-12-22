@@ -2,13 +2,7 @@
 
 source scriptUtils.sh
 
-function __check_output() {
-    if [[ $? -ne 0 ]]; then
-        echo "Error getting JSON"
-        exit 1
-    fi
-}
-
+# Returns initial JSON that contains critical data about HLS location and video name + description
 function getMainJSON() {
     VIDEO_ID=$1
 
@@ -16,6 +10,7 @@ function getMainJSON() {
          -H "Authorization: Bearer ${TOKEN}"
 }
 
+# Returns video URL
 function videolink_query() {
     LINK=$1
 
@@ -26,6 +21,7 @@ function videolink_query() {
         tail -n 1
 }
 
+# Returns audio URL
 function audiolink_query() {
     LINK=$1
 
@@ -35,6 +31,7 @@ function audiolink_query() {
         tail -n 1
 }
 
+# Returns key URL
 function getProtectionKeyURL() {
     LINK=$1
 
@@ -44,6 +41,7 @@ function getProtectionKeyURL() {
         tr -d '"'
 }
 
+# Downloads and saved full original manifest needed to download video/audio fragments
 function download_m3u8_data() {
     LINK=$1
     OFILE=$2
@@ -59,13 +57,7 @@ function download_m3u8_data() {
         -H "Authorization: Bearer ${TOKEN}" > $OFILE
 }
 
-function audio_data_full() {
-    LINK=$1
-
-    curl -s $LINK \
-        -H "Authorization: Bearer ${TOKEN}" > $OFILE
-}
-
+# Makes TMP file needed to locate audio fragments downloaded locally with aria2
 function create_tmp_m3u8_audio() {
     IFILE=$1
     TMP_KEY="file://$(pwd)/tmp"
@@ -80,6 +72,7 @@ function create_tmp_m3u8_audio() {
         sed -E "s#.*(Fragments.*)#${APATH}\1#" > ./tmp/audio_tmp.m3u8
 }
 
+# Creates file that contains key to decrypt audio/video fragments
 function protectionKey_query() {
     LINK=$1
     OFILE=$2
@@ -89,6 +82,7 @@ function protectionKey_query() {
         -H "encoding: null" > $OFILE
 }
 
+# Makes TMP file needed to locate video fragments downloaded locally with aria2
 function create_tmp_m3u8_video() {
     IFILE=$1
     TMP_KEY="file://$(pwd)/tmp"
@@ -103,6 +97,7 @@ function create_tmp_m3u8_video() {
         sed -E "s#.*(Fragments.*)#${VPATH}\1#" > ./tmp/video_tmp.m3u8
 }
 
+# Downloads video/audio fragments FAST
 function aria2_download() {
     FILE=$1
     path=$2
@@ -116,6 +111,7 @@ function aria2_download() {
         --header="Authorization: Bearer ${TOKEN}" 1>/dev/null 2>&1
 }
 
+# Joins video and audio fragments after download
 function join_video_audio() {
     VFILE=$1
     AFILE=$2
@@ -136,10 +132,12 @@ function join_video_audio() {
     fi
 }
 
+# Cleans tmp folder
 function clean_tmp() {
     rm -r tmp/*
 }
 
+# Extracts FIELD from given JSON
 function getJSONdata() {
     JSON=$1
     FIELD=$2
@@ -148,6 +146,7 @@ function getJSONdata() {
     jq -r ".${FIELD}" 2>/dev/null
 }
 
+# Downloads video given a GUID that usually appears at the end of the sharing link
 function download_video() {
     GUID=$1
 
@@ -175,7 +174,7 @@ function download_video() {
     clean_tmp
 }
 
-export TOKEN=$(cat token)
+export TOKEN=$( cat token )
 
 if [[ ! -d "./videos" ]]; then
     mkdir videos
