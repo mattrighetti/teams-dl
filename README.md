@@ -1,13 +1,13 @@
 # teams-dl
 This script will download Teams Meetings locally
 
-Inspired by [snobu/destreamer](https://github.com/snobu/destreamer) but faster with aria2 and multiprocessing
+Inspired by [snobu/destreamer](https://github.com/snobu/destreamer) and [sup3rgiu/MStreamDownloader](https://github.com/sup3rgiu/MStreamDownloader) but faster with aria2 and multiprocessing
 
 ## Prerequisites
 - Linux, macOS (this has not been tested on Windows)
 - [`jq`](https://github.com/stedolan/jq)
-- `ffmpeg`
-- aria2
+- [`ffmpeg`](https://github.com/FFmpeg/FFmpeg)
+- [`aria2`](https://github.com/aria2/aria2)
 
 ## How to use
 The best way you can use this tool
