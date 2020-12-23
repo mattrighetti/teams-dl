@@ -48,8 +48,6 @@ function download_m3u8_data() {
     OFILE_FOLDER=${OFILE%%/*}
 
     if [[ ! -d $OFILE_FOLDER ]]; then
-        warnln "$OFILE_FOLDER doesn't exist"
-        infoln "Creating folder..."
         mkdir -p $OFILE_FOLDER
     fi
 
@@ -60,7 +58,8 @@ function download_m3u8_data() {
 # Makes TMP file needed to locate audio fragments downloaded locally with aria2
 function create_tmp_m3u8_audio() {
     IFILE=$1
-    TMP_KEY="file://$(pwd)/tmp"
+    tmp_folder=${IFILE%%/*}
+    TMP_KEY="file://$(pwd)/$tmp_folder"
     KEY_FILE="my.key"
     ID=$( cat $IFILE | grep -o -E '".*"' | sed -E "s/.*api\/videos\/([A-Za-z0-9-]+)\/.*/\1/" )
 
@@ -69,7 +68,7 @@ function create_tmp_m3u8_audio() {
 
     cat $IFILE | \
         sed -e "s#\".*\"#\"${NEW_URI}\"#" | \
-        sed -E "s#.*(Fragments.*)#${APATH}\1#" > ./tmp/audio_tmp.m3u8
+        sed -E "s#.*(Fragments.*)#${APATH}\1#" > "./$tmp_folder/audio_tmp.m3u8"
 }
 
 # Creates file that contains key to decrypt audio/video fragments
@@ -85,7 +84,8 @@ function protectionKey_query() {
 # Makes TMP file needed to locate video fragments downloaded locally with aria2
 function create_tmp_m3u8_video() {
     IFILE=$1
-    TMP_KEY="file://$(pwd)/tmp"
+    tmp_folder=${IFILE%%/*}
+    TMP_KEY="file://$(pwd)/$tmp_folder"
     KEY_FILE="my.key"
     ID=$( cat $IFILE | grep -o -E '".*"' | sed -E "s/.*api\/videos\/([A-Za-z0-9-]+)\/.*/\1/" )
 
@@ -94,7 +94,7 @@ function create_tmp_m3u8_video() {
 
     cat $IFILE | \
         sed -e "s#\".*\"#\"${NEW_URI}\"#" | \
-        sed -E "s#.*(Fragments.*)#${VPATH}\1#" > ./tmp/video_tmp.m3u8
+        sed -E "s#.*(Fragments.*)#${VPATH}\1#" > "./$tmp_folder/video_tmp.m3u8"
 }
 
 # Downloads video/audio fragments FAST
@@ -103,7 +103,6 @@ function aria2_download() {
     path=$2
     n=$3
 
-    infoln "Downloading ${FILE} of ${TITLE} ..."
     aria2c -i "${FILE}" \
         -j $n \
         -x $n \
@@ -125,16 +124,11 @@ function join_video_audio() {
         -async 1 -c copy -bsf:a aac_adtstoasc -n "$OFILE" 1>/dev/null 2>&1
     
     if [[ $? -ne 0 ]]; then
-        fatalln "Something went wrong"
-        fatalln "Exit with status 1"
+        errorln "Something went wrong with video/audio parsing"
+        errorln "Affected video: $OFILE"
     else
-        successln "Successfully downloaded $TITLE - $DESCRIPTION"
+        successln "Successfully downloaded $OFILE"
     fi
-}
-
-# Cleans tmp folder
-function clean_tmp() {
-    rm -r tmp/*
 }
 
 # Extracts FIELD from given JSON
@@ -149,29 +143,35 @@ function getJSONdata() {
 # Downloads video given a GUID that usually appears at the end of the sharing link
 function download_video() {
     GUID=$1
+    tmp_folder=$2
 
     JSON=$( getMainJSON ${GUID} )
 
     HLS_URL=$(getJSONdata "${JSON}" "playbackUrls[2].playbackUrl")
-    export TITLE=$( getJSONdata "${JSON}" "name" )
-    export DESCRIPTION=$( getJSONdata "${JSON}" "description" )
+    TITLE=$( getJSONdata "${JSON}" "name" )
+    DESCRIPTION=$( getJSONdata "${JSON}" "description" )
+    OUTFILE="videos/${TITLE}-${DESCRIPTION}-$tmp_folder-$(date +%s).mp4"
     BASE_URL="${HLS_URL%/*}/"
     VIDEO_URI=$( videolink_query $HLS_URL )
     AUDIO_URI=$( audiolink_query $HLS_URL )
 
-    download_m3u8_data "$BASE_URL$VIDEO_URI" "tmp/video_full.m3u8"
-    download_m3u8_data "$BASE_URL$AUDIO_URI" "tmp/audio_full.m3u8"
+    download_m3u8_data "$BASE_URL$VIDEO_URI" "$tmp_folder/video_full.m3u8"
+    download_m3u8_data "$BASE_URL$AUDIO_URI" "$tmp_folder/audio_full.m3u8"
 
     PROTECTION_KEY_URL="$( getProtectionKeyURL "$BASE_URL$VIDEO_URI" )"
-    protectionKey_query $PROTECTION_KEY_URL "tmp/my.key"
+    protectionKey_query $PROTECTION_KEY_URL "$tmp_folder/my.key"
 
-    aria2_download "tmp/video_full.m3u8" "tmp/video_segments" 5
-    aria2_download "tmp/audio_full.m3u8" "tmp/audio_segments" 5
+    infoln "Downloading $OUTFILE"
 
-    create_tmp_m3u8_video "tmp/video_full.m3u8"
-    create_tmp_m3u8_audio "tmp/audio_full.m3u8"
-    join_video_audio "tmp/audio_tmp.m3u8" "tmp/video_tmp.m3u8" "videos/${TITLE} - ${DESCRIPTION}.mp4"
-    clean_tmp
+    aria2_download "$tmp_folder/video_full.m3u8" "$tmp_folder/video_segments" 5
+    aria2_download "$tmp_folder/audio_full.m3u8" "$tmp_folder/audio_segments" 5
+
+    create_tmp_m3u8_video "$tmp_folder/video_full.m3u8"
+    create_tmp_m3u8_audio "$tmp_folder/audio_full.m3u8"
+
+    infoln "Joining videos/${TITLE}-${DESCRIPTION}-$(date +%s).mp4"
+    join_video_audio "$tmp_folder/audio_tmp.m3u8" "$tmp_folder/video_tmp.m3u8" "$OUTFILE"
+    rm -r $tmp_folder/*
 }
 
 export TOKEN=$( cat token )
@@ -180,10 +180,21 @@ if [[ ! -d "./videos" ]]; then
     mkdir videos
 fi
 
+if [[ ! -z $1 ]]; then
+    N=$1
+    warnln "Running with parallelization of $N"
+    infoln "Getting ready for ultra speed"
+else
+    N=1
+fi
+
+i=0
 while read LINK; do
+    ((i=i%N)); ((i++==0)) && wait
     guid=${LINK##*/}
     successln $guid
-    download_video $guid
+    download_video $guid "tmp$i" &
 done < links.txt
+wait
 
 exit 0
