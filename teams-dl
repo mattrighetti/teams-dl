@@ -48,8 +48,6 @@ function download_m3u8_data() {
     OFILE_FOLDER=${OFILE%%/*}
 
     if [[ ! -d $OFILE_FOLDER ]]; then
-        warnln "$OFILE_FOLDER doesn't exist"
-        infoln "Creating folder..."
         mkdir -p $OFILE_FOLDER
     fi
 
@@ -105,7 +103,6 @@ function aria2_download() {
     path=$2
     n=$3
 
-    infoln "Downloading ${FILE} of ${TITLE} ..."
     aria2c -i "${FILE}" \
         -j $n \
         -x $n \
@@ -128,9 +125,9 @@ function join_video_audio() {
     
     if [[ $? -ne 0 ]]; then
         errorln "Something went wrong with video/audio parsing"
-        errorln "Affected video: $TITLE - $DESCRIPTION"
+        errorln "Affected video: $OFILE"
     else
-        successln "Successfully downloaded $TITLE - $DESCRIPTION"
+        successln "Successfully downloaded $OFILE"
     fi
 }
 
@@ -151,8 +148,9 @@ function download_video() {
     JSON=$( getMainJSON ${GUID} )
 
     HLS_URL=$(getJSONdata "${JSON}" "playbackUrls[2].playbackUrl")
-    export TITLE=$( getJSONdata "${JSON}" "name" )
-    export DESCRIPTION=$( getJSONdata "${JSON}" "description" )
+    TITLE=$( getJSONdata "${JSON}" "name" )
+    DESCRIPTION=$( getJSONdata "${JSON}" "description" )
+    OUTFILE="videos/${TITLE}-${DESCRIPTION}-$tmp_folder-$(date +%s).mp4"
     BASE_URL="${HLS_URL%/*}/"
     VIDEO_URI=$( videolink_query $HLS_URL )
     AUDIO_URI=$( audiolink_query $HLS_URL )
@@ -163,12 +161,16 @@ function download_video() {
     PROTECTION_KEY_URL="$( getProtectionKeyURL "$BASE_URL$VIDEO_URI" )"
     protectionKey_query $PROTECTION_KEY_URL "$tmp_folder/my.key"
 
+    infoln "Downloading $OUTFILE"
+
     aria2_download "$tmp_folder/video_full.m3u8" "$tmp_folder/video_segments" 5
     aria2_download "$tmp_folder/audio_full.m3u8" "$tmp_folder/audio_segments" 5
 
     create_tmp_m3u8_video "$tmp_folder/video_full.m3u8"
     create_tmp_m3u8_audio "$tmp_folder/audio_full.m3u8"
-    join_video_audio "$tmp_folder/audio_tmp.m3u8" "$tmp_folder/video_tmp.m3u8" "videos/${TITLE}-${DESCRIPTION}-$tmp_folder.mp4"
+
+    infoln "Joining videos/${TITLE}-${DESCRIPTION}-$(date +%s).mp4"
+    join_video_audio "$tmp_folder/audio_tmp.m3u8" "$tmp_folder/video_tmp.m3u8" "$OUTFILE"
     rm -r $tmp_folder/*
 }
 
@@ -179,9 +181,9 @@ if [[ ! -d "./videos" ]]; then
 fi
 
 if [[ ! -z $1 ]]; then
+    N=$1
     warnln "Running with parallelization of $N"
     infoln "Getting ready for ultra speed"
-    N=$1
 else
     N=1
 fi
