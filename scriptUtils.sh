@@ -5,6 +5,7 @@ C_RED='\033[0;31m'
 C_GREEN='\033[0;32m'
 C_BLUE='\033[0;34m'
 C_YELLOW='\033[1;33m'
+C_PURPLE='\033[1;35m'
 
 # println echos string
 function println() {
@@ -29,6 +30,10 @@ function infoln() {
 # warnln echos in yellow color
 function warnln() {
   println "${C_YELLOW}${1}${C_RESET}"
+}
+
+function debugln() {
+    println "${C_PURPLE}${1}${C_RESET}"
 }
 
 # fatalln echos in red color and exits with fail status
