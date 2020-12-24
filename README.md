@@ -60,4 +60,6 @@ You can specify how many parallel downloads you want by using the `-p` command f
 
 This command will download 5 meetings concurrently
 
-`$ webex-dl -tf ticket.txt -f links.txt -p 5`
+```sh
+$ teams-dl -tf ticket.txt -f links.txt -p 5
+```
