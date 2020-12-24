@@ -146,6 +146,10 @@ function download_video() {
     tmp_folder=$2
 
     JSON=$( getMainJSON ${GUID} )
+    
+    if [[ -z $JSON ]]; then
+        fatalln "Couldn't get JSON data of video $GUID"
+    fi
 
     HLS_URL=$(getJSONdata "${JSON}" "playbackUrls[2].playbackUrl")
     TITLE=$( getJSONdata "${JSON}" "name" )
@@ -174,27 +178,161 @@ function download_video() {
     rm -r $tmp_folder/*
 }
 
-export TOKEN=$( cat token )
+function print_help() {
+    echo "Teams-dl is a script tool that downloads Microsoft Stream meetings that you pass to it"
+    echo "Usage: teams-dl [ -f links_file ] [ -tf ticket_file ] [ -t ticket ] [ -i links ]"
+    echo ""
+    echo "       Command summary:"
+    echo "       -f, --file             Use links contained in file"
+    echo "       -t, --ticket           Input ticket from command line"
+    echo "       -tf, --ticket-file     Use ticket contained in file"
+    echo "       -i                     Input links from command line and don't use file input"
+    echo "       -p                     Launches specified number of processes"
+    echo "       -o                     Download videos in specified folder"
+    echo "       -v                     Output verbose logs"
+    echo "       -h, --help             Print info about the program"
+    exit 0
+}
 
-if [[ ! -d "./videos" ]]; then
-    mkdir videos
+
+
+# GLOBAL
+PROCESSES=1
+DOWNLOAD_FOLDER="videos"
+
+if [[ $# -eq 0 ]]; then
+    print_help
 fi
 
-if [[ ! -z $1 ]]; then
-    N=$1
-    warnln "Running with parallelization of $N"
-    infoln "Getting ready for ultra speed"
+# ARG PARSER
+while [[ $# -ge 1 ]]; do
+key="$1"
+    case $key in
+        -f|--file)
+        if [[ ! -z "$2" ]]; then
+            LINKS_FILE=$2
+        else
+            fatalln "You have not provided enough arguments for flag -f"
+        fi
+        shift
+        shift
+        ;;
+        -t|--token)
+        if [[ ! -z "$2" ]]; then
+            export TOKEN=$2
+        else
+            fatalln "You have not provided enough arguments for flag -t"
+        fi
+        shift
+        shift
+        ;;
+        -tf|--token-file)
+        if [[ ! -z "$2" ]]; then
+            TOKEN_FILE=$2
+        else
+            fatalln "You have not provided enough arguments for flag -tf"
+        fi
+        shift
+        shift
+        ;;
+        -i)
+        shift
+        ;;
+        -p)
+        if [[ ! -z "$2" ]]; then
+            PROCESSES=$2
+        else
+            fatalln "You have not provided enough arguments for flag -p"
+        fi
+        shift
+        shift
+        ;;
+        -o)
+        if [[ ! -z "$2" ]]; then
+            DOWNLOAD_FOLDER=$2
+        else
+            fatalln "You have not provided enough arguments for flag -o"
+        fi
+        shift
+        shift
+        ;;
+        -v)
+        VERBOSE=true
+        shift
+        ;;
+        -h|--help)
+        print_help
+        ;;
+        https*)
+        LINKS+=( "$1" )
+        shift
+        ;;
+        -*|--*)
+        errorln "Error: flag $1 is not recognized"
+        exit 1
+        ;;
+        *)
+        errorln "Error: $1 could not be recognized"
+        exit 1
+        ;;
+    esac
+done
+
+if [[ "$VERBOSE" = true ]]; then
+    debugln "LINKS_FILE=$LINKS_FILE"
+    debugln "LINKS=$LINKS"
+    debugln "TOKEN=$TOKEN"
+    debugln "TOKEN_FILE=$TOKEN_FILE"
+    debugln "PROCESSES=$PROCESSES"
+    debugln "OUTPUT_FOLDER=$DOWNLOAD_FOLDER"
+fi
+
+if [[ -z $LINKS_FILE  ]] && [[ -z $LINKS ]]; then
+    fatalln "No link or link file has been specified"
+fi
+
+if [[ ! -z $LINKS_FILE  ]] && [[ ! -z $LINKS ]]; then
+    warnln "You have given a link file and more input links, only the file links will be downloaded"
+    LINKS=()
+fi
+
+if [[ ! -f $LINKS_FILE ]]; then
+    fatalln "$LINKS_FILE doesn't exist."
 else
-    N=1
+    echo "ok $LINKS_FILE"
+fi
+
+if [[ -z $TOKEN_FILE  ]] && [[ -z $TOKEN ]]; then
+    fatalln "No ticket or ticket file has been specified"
+fi
+
+if [[ ! -z $TOKEN_FILE  ]] && [[ ! -z $TOKEN ]]; then
+    warnln "You have given a ticket file and a ticket input, only the ticket file will be used"
+fi
+
+# MAIN
+
+if [[ -z $TOKEN ]]; then
+    export TOKEN=$( cat token )
+fi
+
+if [[ ! -d $DOWNLOAD_FOLDER ]]; then
+    mkdir -p $DOWNLOAD_FOLDER
+fi
+
+if [[ ${#LINKS[@]} -eq 0 ]]; then
+    while read LINK; do
+        LINKS+=( "$LINK" )
+    done < $LINKS_FILE
 fi
 
 i=0
-while read LINK; do
-    ((i=i%N)); ((i++==0)) && wait
-    guid=${LINK##*/}
+for link in "${LINKS[@]}"; do
+    ((i=i%PROCESSES)); ((i++==0)) && wait
+    guid=${link##*/}
     successln $guid
     download_video $guid "tmp$i" &
-done < links.txt
+done
 wait
 
 exit 0
