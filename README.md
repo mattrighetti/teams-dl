@@ -1,5 +1,5 @@
 # teams-dl
-This script will download Teams Meetings locally
+Bash-flavored multi-process script tool that will download Microsoft Teams meetings hosted on Microsoft Stream
 
 Inspired by [snobu/destreamer](https://github.com/snobu/destreamer) and [sup3rgiu/MStreamDownloader](https://github.com/sup3rgiu/MStreamDownloader) but faster with aria2 and multiprocessing
 
