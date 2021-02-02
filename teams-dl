@@ -250,7 +250,7 @@ key="$1"
         -o)
         if [[ ! -z "$2" ]]; then
             DOWNLOAD_FOLDER=$2
-        else if [[ "$2"!=tmp* ]]; then
+        elif [[ "$2" != tmp* ]]; then
             fatalln "You can't use $2 as download folder name because tmp[0-9] is reserved for aria2 fragments"
         else
             fatalln "You have not provided enough arguments for flag -o"
